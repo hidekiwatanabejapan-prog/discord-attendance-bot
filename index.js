@@ -1,4 +1,5 @@
 const { Client, GatewayIntentBits } = require('discord.js');
+const cron = require('node-cron');
 
 const client = new Client({
   intents: [
@@ -13,6 +14,7 @@ const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPO = 'hidekiwatanabejapan-prog/mallpro-attendance';
 const WORKFLOW_FILE = 'attendance.yml';
+const DISCORD_CHANNEL_ID = '1487748424450314280';
 
 // 今日すでに出勤報告済みかチェック用
 let lastTriggeredDate = null;
@@ -33,46 +35,61 @@ async function triggerGitHubActions() {
   return response.status === 204;
 }
 
-client.once('ready', () => {
-  console.log(`✅ Bot起動: ${client.user.tag}`);
-});
-
-client.on('messageCreate', async (message) => {
-  // ボット自身のメッセージは無視
-  if (message.author.bot) return;
-
-  const content = message.content.trim();
-
-  // 「おはよう」を含むメッセージを検知（大文字小文字・全角半角問わず）
-  if (!content.includes('おはよう') && !content.toLowerCase().includes('ohayo')) return;
-
-  // 今日すでに実行済みの場合はスキップ
+async function runAttendance(channel) {
   const today = new Date().toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
   if (lastTriggeredDate === today) {
-    await message.reply('おはようございます！本日の出勤報告はすでに完了しています ✅');
+    console.log('本日の出勤報告はすでに完了しています');
     return;
   }
 
   try {
-    await message.reply('おはようございます！出勤報告を実行中です... ⏳');
+    if (channel) await channel.send('おはようございます！出勤報告を実行中です... ⏳');
+    console.log('出勤報告を実行中...');
 
     const success = await triggerGitHubActions();
 
     if (success) {
       lastTriggeredDate = today;
-      await message.reply('✅ 出勤報告が完了しました！今日も頑張りましょう！');
+      if (channel) await channel.send('✅ 出勤報告が完了しました！今日も頑張りましょう！');
+      console.log('出勤報告が完了しました');
     } else {
-      await message.reply('⚠️ 出勤報告の実行に失敗しました。GitHubを確認してください。');
+      if (channel) await channel.send('⚠️ 出勤報告の実行に失敗しました。GitHubを確認してください。');
+      console.log('出勤報告に失敗しました');
     }
   } catch (error) {
     console.error('エラー:', error);
-    await message.reply('❌ エラーが発生しました: ' + error.message);
+    if (channel) await channel.send('❌ エラーが発生しました: ' + error.message);
   }
+}
+
+client.once('ready', () => {
+  console.log(`✅ Bot起動: ${client.user.tag}`);
+
+  // 毎朝8時（JST）に自動実行 → UTC 23時
+  cron.schedule('0 23 * * *', async () => {
+    console.log('定刻8時: 自動出勤報告を実行します');
+    const channel = client.channels.cache.get(DISCORD_CHANNEL_ID);
+    await runAttendance(channel);
+  }, {
+    timezone: 'UTC'
+  });
+
+  console.log('毎朝8時（JST）の自動出勤報告スケジュールが設定されました');
+});
+
+// Discordで「おはよう」と送った場合も手動実行可能
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+
+  const content = message.content.trim();
+  if (!content.includes('おはよう') && !content.toLowerCase().includes('ohayo')) return;
+
+  await runAttendance(message.channel);
 });
 
 client.login(DISCORD_BOT_TOKEN);
 
-// Render用のヘルスチェックサーバー（ポートバインディングが必要なため）
+// Render用ヘルスチェックサーバー
 const http = require('http');
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
