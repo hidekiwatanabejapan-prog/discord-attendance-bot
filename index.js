@@ -71,3 +71,13 @@ client.on('messageCreate', async (message) => {
 });
 
 client.login(DISCORD_BOT_TOKEN);
+
+// Render用のヘルスチェックサーバー（ポートバインディングが必要なため）
+const http = require('http');
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end('Discord Bot is running!');
+}).listen(PORT, () => {
+  console.log(`Health check server running on port ${PORT}`);
+});
